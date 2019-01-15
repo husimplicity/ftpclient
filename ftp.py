@@ -319,8 +319,8 @@ if __name__ == '__main__':
     # - password    =   password
 
     host = '127.0.0.1'
-    port = 8821
-    user = 'hatsu3'
+    port = 8822
+    user = 'username'
     passwd = 'password'
 
     ftp_client = FTP()
