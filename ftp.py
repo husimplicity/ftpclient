@@ -550,7 +550,7 @@ if __name__ == '__main__':
 
     while True:
         # cmd = input(f'{UNDERLINE}{BOLD}FTP ➜ ').split()
-        prompt = f'{UNDERLINE}{BOLD}FTP {OKBLUE}{host}:{port} {OKGREEN}{ftp_client.pwd()} ➜'
+        prompt = f'{UNDERLINE}{BOLD}FTP {OKBLUE}{host}:{port} {OKGREEN}{os.getcwd()} ⌁ {ftp_client.pwd()} ➜'
         cmd = timeout_input(prompt, timeout=20)
         while cmd is None:
             ftp_client.send_noop()
@@ -592,13 +592,13 @@ if __name__ == '__main__':
         elif cmd_type == 'cd':
             dirname = '' if not cmd_args else cmd_args[0]
             print(f'Changing working directory to {dirname}')
-            print()
             try:
                 ftp_client.cwd(dirname)
             except error_perm:
                 print_warning(f'{dirname}: No such directory')
-                print()
                 continue
+            finally:
+                print()
         elif cmd_type == 'pwd':
             print(f'Current working directory: {ftp_client.pwd()}')
             print()
@@ -648,6 +648,7 @@ if __name__ == '__main__':
             - rename <FROM_NAME> <TO_NAME>
             - sz <FILENAME>
             - rm <FILENAME>
+            - ccd <PATH>
             ''')
             print()
         elif cmd_type == 'download':
@@ -759,6 +760,21 @@ if __name__ == '__main__':
                 continue
             print(f'Size of {filename} is {sz} bytes')
             print()
+        elif cmd_type == 'ccd':
+            if len(cmd_args) != 1:
+                print('ccd <PATH>')
+                print()
+                continue
+            new_path = cmd_args[0]
+            try:
+                os.chdir(new_path)
+                print(f'[client] Working directory changed to {os.getcwd()}')
+            except:
+                print_warning(f'Failed to cd to {new_path}')
+            finally:
+                print()
+        elif cmd_type == 'ccwd':
+            print(f'[client] Current working directory is {os.getcwd()}')
         else:
             print('Invalid command. Try help')
             print()
