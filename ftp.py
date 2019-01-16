@@ -388,11 +388,14 @@ class FTP:
         else:
             return '{:>6} GiB'.format(n_byte // GB)
 
-    def pretty_mlsd(self, path=''):
+    def pretty_mlsd(self, path='', short=False):
         file_list = self.mlsd(path=path, facts=["type", "size", "perm"])
         for f in file_list:
-            print("{:<12}\t\t".format(f[1].get('perm', '---------')), end='')
-            print(f"{self.format_size_(f[1].get('size', -1))}\t\t", end='')
+            if short and f[0].startswith('.'):
+                continue
+            if not short:
+                print("{:<12}\t\t".format(f[1].get('perm', '---------')), end='')
+                print(f"{self.format_size_(f[1].get('size', -1))}\t\t", end='')
             if f[1].get('type', 'none') == 'dir':
                 print(f'{BOLD}{f[0]}{ENDC}')
             else:
@@ -536,17 +539,24 @@ if __name__ == '__main__':
         if cmd_type == 'exit' or cmd_type == 'quit':
             ftp_client.quit()
             break
-        elif cmd_type == 'ls':
+        elif cmd_type == 'll':
             dirname = '.' if not cmd_args else cmd_args[0]
             try:
                 ftp_client.dir(dirname, print)
             except error_perm:
                 print_warning(f'{dirname}: No such directory')
                 continue
-        elif cmd_type == 'll':
+        elif cmd_type == 'ls':
             dirname = '.' if not cmd_args else cmd_args[0]
             try:
-                ftp_client.pretty_mlsd(dirname)
+                ftp_client.pretty_mlsd(dirname, short=True)
+            except error_perm:
+                print_warning(f'{dirname}: No such directory')
+                continue
+        elif cmd_type == 'lh':
+            dirname = '.' if not cmd_args else cmd_args[0]
+            try:
+                ftp_client.pretty_mlsd(dirname, short=False)
             except error_perm:
                 print_warning(f'{dirname}: No such directory')
                 continue
