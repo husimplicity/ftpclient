@@ -1,17 +1,25 @@
 import socket
 import os
 import sys
+from tqdm import tqdm
 from pathlib import Path
 
 CRLF = '\r\n'
 B_CRLF = b'\r\n'
 FTP_PORT = 21
 
+# https://stackoverflow.com/questions/287871/print-in-terminal-with-colors
+BOLD = '\033[1m'
+ENDC = '\033[0m'
+WARNING = '\033[93m'
+BGCOLOR = '\033[6;30;42m'
+UNDERLINE = '\033[4m'
+
 # Exception raised when an error or invalid response is received
 class Error(Exception): pass
 class error_reply(Error): pass          # unexpected [123]xx reply
 class error_temp(Error): pass           # 4xx errors
-class error_perm(Error): pass           # 5xx errors
+class error_perm(Error): pass           # 5xx errors
 class error_proto(Error): pass          # response does not begin with [1-5]
 all_errors = {Error, IOError, EOFError}
 
@@ -24,20 +32,23 @@ class FTP:
     welcome = None
     passiveserver = 1
     maxline = MAXLINE
-    
+
 
     def __init__(self, host=None, user=None, passwd=None, acct=None,
                  timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None):
-        print('self defined')
         self.source_address = source_address
         self.encoding = 'latin-1'  # Extended ASCII
         self.timeout = timeout
-#        self.host, self.port, self.sock, self.file, self.welcome
+        # self.host, self.port, self.sock, self.file, self.welcome
 
         if host:
             self.connect(host)
             if user:
                 self.login(user, passwd, acct)
+
+    def send_noop(self):
+        # https://stackoverflow.com/questions/15170503/checking-a-python-ftp-connection
+        self.voidcmd('NOOP')
 
     def sendcmd(self, cmd):
         self.putline(cmd)
@@ -84,7 +95,6 @@ class FTP:
         self.file = self.sock.makefile(mode='r', encoding=self.encoding)
         self.welcome = self.getresp()
         return self.welcome
-
 
     def putline(self, cmd):
         cmd = cmd + CRLF
@@ -152,9 +162,13 @@ class FTP:
         if callback is None:
             callback = print
         resp = self.sendcmd('TYPE A')
+        # num_lines = sum(1 for l in open('ftp.py', 'r'))
         with self.transfercmd(cmd) as conn, \
                  conn.makefile('r', encoding=self.encoding) as fp:
-            while 1:
+            import time
+            # for i in tqdm(range(num_lines + 1)):
+            while True:
+                time.sleep(0.02)
                 line = fp.readline(self.maxline + 1)
                 if len(line) > self.maxline:
                     raise Error("got more than %d bytes" % self.maxline)
@@ -164,7 +178,30 @@ class FTP:
                     line = line[:-2]
                 elif line[-1:] == '\n':
                     line = line[:-1]
-                callback(line)
+                callback(line);
+                # self.send_noop();
+        return self.voidresp()
+
+    def retrbinary(self, cmd, callback, blocksize=8192, rest=None):
+        self.voidcmd('TYPE I')
+        with self.transfercmd(cmd, rest) as conn:
+            while 1:
+                data = conn.recv(blocksize)
+                if not data:
+                    break
+                callback(data)
+        return self.voidresp()
+
+    def storbinary(self, cmd, fp, blocksize=8192, callback=None, rest=None):
+        self.voidcmd('TYPE I')
+        with self.transfercmd(cmd, rest) as conn:
+            while 1:
+                buf = fp.read(blocksize)
+                if not buf:
+                    break
+                conn.sendall(buf)
+                if callback:
+                    callback(buf)
         return self.voidresp()
 
     def ntransfercmd(self, cmd, rest=None):
@@ -281,6 +318,38 @@ class FTP:
 
         return self.voidresp()
 
+    def rename(self, fromname, toname):
+        resp = self.sendcmd('RNFR ' + fromname)
+        if resp[0] != '3':
+            raise error_reply(resp)
+        return self.voidcmd('RNTO ' + toname)
+
+    def delete(self, filename):
+        resp = self.sendcmd('DELE ' + filename)
+        if resp[:3] in {'250', '200'}:
+            return resp
+        else:
+            raise error_reply(resp)
+
+    def size(self, filename):
+        self.voidcmd('TYPE I')
+        # The SIZE command is defined in RFC-3659
+        resp = self.sendcmd('SIZE ' + filename)
+        if resp[:3] == '213':
+            s = resp[3:].strip()
+            return int(s)
+
+    def mkd(self, dirname):
+        resp = self.voidcmd('MKD ' + dirname)
+        # fix around non-compliant implementations such as IIS shipped
+        # with Windows server 2003
+        if not resp.startswith('257'):
+            return ''
+        return parse257(resp)
+
+    def rmd(self, dirname):
+        return self.voidcmd('RMD ' + dirname)
+
 
 def test():
     ftp = FTP('127.0.0.1','hatsu3','password')
@@ -372,8 +441,11 @@ def parse257(resp):
         dirname = dirname + c
     return dirname
 
-# test() 
+# test()
 
+
+def print_warning(warning):
+    print(WARNING + warning + ENDC)
 
 if __name__ == '__main__':
     # run_ftp_server.py
@@ -405,13 +477,6 @@ if __name__ == '__main__':
     # # -> drwx------   2 hatsu3   staff          64 Dec 26 16:19 .CMVolumes
     # # -> <OMITTED> ...
 
-    # https://stackoverflow.com/questions/287871/print-in-terminal-with-colors
-    BOLD = '\033[1m'
-    ENDC = '\033[0m'
-    WARNING = '\033[93m'
-    BGCOLOR = '\033[6;30;42m'
-    UNDERLINE = '\033[4m'
-
     while True:
         cmd = input(f'{UNDERLINE}{BOLD}FTP ➜ ').split()
         print(ENDC, end='')
@@ -431,17 +496,23 @@ if __name__ == '__main__':
             try:
                 ftp_client.cwd(dirname)
             except error_perm:
-                print(f'{WARNING}No such file or directory{ENDC}')
+                print_warning(f'{dirname}: No such directory')
         elif cmd_type == 'pwd':
             print(f'Current working directory: {ftp_client.pwd()}')
-        elif cmd_type == 'download':
-            if not cmd_args:
+        elif cmd_type == 'download_text':
+            if len(cmd_args) != 1:
                 print('download <FILENAME>')
                 continue
             filename = cmd_args[0]
-            ftp_client.retrlines(f'RETR {filename}', callback=print)
-        elif cmd_type == 'store':
-            if not cmd_args:
+            try:
+                ftp_client.retrlines(f'RETR {filename}', callback=print)
+            except error_perm:
+                print_warning(f'{filename}: No such directory')
+                continue
+            remote_path = Path(ftp_client.pwd()) / filename
+            print(f'Downloaded text file {remote_path}')
+        elif cmd_type == 'store_text':
+            if len(cmd_args) != 1:
                 print('store <FILENAME>')
                 continue
             filename = cmd_args[0]
@@ -452,16 +523,105 @@ if __name__ == '__main__':
                 continue
             fp = file_path.open(mode='rb')
             ftp_client.storlines(f'STOR {filename}', fp=fp, callback=None)
+            remote_path = Path(ftp_client.pwd()) / Path(filename).name
+            print(f'{filename} saved at {remote_path}')
         elif cmd_type == 'help':
             print('''
             - exit
             - ls </./../DIRNAME>
             - cd </./../DIRNAME>
             - pwd
-            - download <FILENAME>
-            - store <FILENAME>
+            - download_text / download <FILENAME>
+            - store_text / store <FILENAME>
             - help
+            - mkdir <DIRNAME>
+            - rmdir <DIRNAME>
+            - rename <FROM_NAME> <TO_NAME>
+            - sz <FILENAME>
+            - rm <FILENAME>
             ''')
+        elif cmd_type == 'download':
+            # download binary files
+            if len(cmd_args) != 1:
+                print('download <FILENAME>')
+                continue
+            filename = cmd_args[0]
+            local_path = Path(filename).name
+            try:
+                with open(local_path, 'wb') as fp:
+                    ftp_client.retrbinary(f'RETR {filename}', callback=(lambda x: fp.write(x)))
+            except error_perm:
+                print_warning(f'{filename}: No such directory')
+                continue
+            remote_path = Path(ftp_client.pwd()) / filename
+            print(f'Downloaded binary file {remote_path}')
+        elif cmd_type == 'store':
+            # uploas binary files
+            if len(cmd_args) != 1:
+                print('store <FILENAME>')
+                continue
+            filename = cmd_args[0]
+            file_path = Path(filename)
+            print(f'Checking {file_path}...')
+            if not file_path.is_file():
+                print_warning(f'{filename}: No such file')
+                continue
+            fp = file_path.open(mode='rb')
+            ftp_client.storbinary(f'STOR {filename}', fp=fp, callback=None)
+            remote_path = Path(ftp_client.pwd()) / Path(filename).name
+            print(f'{filename} saved at {remote_path}')
+        elif cmd_type == 'rm':
+            if len(cmd_args) != 1:
+                print('rm <FILENAME>')
+                continue
+            filename = cmd_args[0]
+            try:
+                ftp_client.delete(filename)
+            except error_perm:
+                print_warning(f'{filename}: No such file')
+                continue
+            remote_path = Path(ftp_client.pwd()) / filename
+            print(f'Deleted {remote_path}')
+        elif cmd_type == 'mkdir':
+            if len(cmd_args) != 1:
+                print('mkdir <DIRNAME>')
+                continue
+            dirname = cmd_args[0]
+            ftp_client.mkd(dirname)
+            print(f'Created directory {dirname}')
+        elif cmd_type == 'rmdir':
+            if len(cmd_args) != 1:
+                print('rmdir <DIRNAME>')
+                continue
+            dirname = cmd_args[0]
+            try:
+                ftp_client.rmd(dirname)
+            except error_perm:
+                print_warning(f'{dirname}: No such directory')
+                continue
+            print(f'Deleted directory {dirname}')
+        elif cmd_type == 'rename':
+            if len(cmd_args) != 2:
+                print('rename <FROM_NAME> <TO_NAME>')
+                continue
+            from_name, to_name = cmd_args
+            try:
+                ftp_client.rename(from_name, to_name)
+            except error_perm:
+                print_warning(f'{from_name}: No such file or directory')
+                continue
+            print(f'Renamed {from_name} to {to_name}')
+        elif cmd_type == 'sz':
+            if len(cmd_args) != 1:
+                print('sz <FILENAME>')
+                continue
+            filename = cmd_args[0]
+            try:
+                sz = ftp_client.size(filename)
+            except error_perm:
+                print_warning(f'{filename}: No such file or directory')
+                continue
+            print(f'Size of {filename} is {sz} bytes')
         else:
             print('Invalid command. Try help')
 

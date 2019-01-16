@@ -65,4 +65,3 @@ d--x--x--x   9 root     wheel         288 Jan 08 04:05 .DocumentRevisions-V100
 ```
 
 
-
