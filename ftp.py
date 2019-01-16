@@ -121,7 +121,7 @@ class FTP:
             line = line[:2]
         elif line[-1:] in CRLF:
             line = line[:-1]
-        print(line)
+        # print(line)
         return line
 
     def getmultiline(self):
@@ -165,10 +165,10 @@ class FTP:
         # num_lines = sum(1 for l in open('ftp.py', 'r'))
         with self.transfercmd(cmd) as conn, \
                  conn.makefile('r', encoding=self.encoding) as fp:
-            import time
+            # import time
             # for i in tqdm(range(num_lines + 1)):
             while True:
-                time.sleep(0.02)
+                # time.sleep(0.02)
                 line = fp.readline(self.maxline + 1)
                 if len(line) > self.maxline:
                     raise Error("got more than %d bytes" % self.maxline)
