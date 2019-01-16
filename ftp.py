@@ -1,8 +1,10 @@
 import socket
 import os
 import sys
+from pathlib import Path
 
 CRLF = '\r\n'
+B_CRLF = b'\r\n'
 FTP_PORT = 21
 
 # Exception raised when an error or invalid response is received
@@ -260,6 +262,23 @@ class FTP:
         resp = self.voidcmd('PWD')
         return parse257(resp)
 
+    def storlines(self, cmd, fp, callback=None):
+        self.voidcmd('TYPE A')
+        with self.transfercmd(cmd) as conn:
+            while True:
+                buf = fp.readline(self.maxline + 1)
+                if not buf:
+                    break
+                if buf[-2:] != B_CRLF:
+                    if buf[-1] in B_CRLF: buf = buf[:-1]
+                    buf = buf + B_CRLF
+                conn.sendall(buf)
+                if callback:
+                    callback(buf)
+
+        return self.voidresp()
+
+
 def test():
     ftp = FTP('127.0.0.1','hatsu3','password')
     resp = ftp.sendcmd("")
@@ -375,13 +394,13 @@ if __name__ == '__main__':
     # -> 30 Login successful.
 
     # ftp_client.dir('.', print)  # ftp_client.dir('./Library')
-    # -> 200 Type set to: ASCII.
-    # -> 227 Entering passive mode (127,0,0,1,204,237).
-    # -> 125 Data connection already open. Transfer starting.
-    # -> -rw-r--r--   1 hatsu3   staff         267 Jul 18  2018 .489614.padl
-    # -> -r--------   1 hatsu3   staff           7 Oct 29 12:26 .CFUserTextEncoding
-    # -> drwx------   2 hatsu3   staff          64 Dec 26 16:19 .CMVolumes
-    # -> <OMITTED> ...
+    # # -> 200 Type set to: ASCII.
+    # # -> 227 Entering passive mode (127,0,0,1,204,237).
+    # # -> 125 Data connection already open. Transfer starting.
+    # # -> -rw-r--r--   1 hatsu3   staff         267 Jul 18  2018 .489614.padl
+    # # -> -r--------   1 hatsu3   staff           7 Oct 29 12:26 .CFUserTextEncoding
+    # # -> drwx------   2 hatsu3   staff          64 Dec 26 16:19 .CMVolumes
+    # # -> <OMITTED> ...
 
     # https://stackoverflow.com/questions/287871/print-in-terminal-with-colors
     BOLD = '\033[1m'
@@ -402,7 +421,7 @@ if __name__ == '__main__':
             break
         elif cmd_type == 'ls':
             dirname = '.' if not cmd_args else cmd_args[0]
-            ftp_client.dir('.', print)
+            ftp_client.dir(dirname, print)
         elif cmd_type == 'cd':
             dirname = '' if not cmd_args else cmd_args[0]
             print(f'Changing working directory to {dirname}')
@@ -417,7 +436,19 @@ if __name__ == '__main__':
                 print('download <FILENAME>')
                 continue
             filename = cmd_args[0]
-            ftp_client.retrlines('RETR ' + filename, callback=print)
+            ftp_client.retrlines(f'RETR {filename}', callback=print)
+        elif cmd_type == 'store':
+            if not cmd_args:
+                print('store <FILENAME>')
+                continue
+            filename = cmd_args[0]
+            file_path = Path(filename)
+            print(f'Checking {file_path}...')
+            if not file_path.is_file():
+                print(f'{WARNING}No such file{ENDC}')
+                continue
+            fp = file_path.open(mode='rb')
+            ftp_client.storlines(f'STOR {filename}', fp=fp, callback=None)
         elif cmd_type == 'help':
             print('''
             - exit
@@ -425,10 +456,12 @@ if __name__ == '__main__':
             - cd </./../DIRNAME>
             - pwd
             - download <FILENAME>
+            - store <FILENAME>
             - help
             ''')
         else:
             print('Invalid command. Try help')
+
     # filename = input('Which file to retrieve: ')
     # # <- Users/hatsu3/Documents/GitHub/ftpclient/ftp.py
     # ftp_client.retrlines('RETR ' + filename, callback=print)
