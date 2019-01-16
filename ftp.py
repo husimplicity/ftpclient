@@ -387,9 +387,12 @@ if __name__ == '__main__':
     BOLD = '\033[1m'
     ENDC = '\033[0m'
     WARNING = '\033[93m'
+    BGCOLOR = '\033[6;30;42m'
+    UNDERLINE = '\033[4m'
 
     while True:
-        cmd = input(f'{BOLD}FTP ➜ {ENDC}').split()
+        cmd = input(f'{UNDERLINE}{BOLD}FTP ➜ ').split()
+        print(ENDC, end='')
         if not cmd:  # empty input
             continue
         cmd_type = cmd[0].lower()
