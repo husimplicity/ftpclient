@@ -350,6 +350,55 @@ class FTP:
     def rmd(self, dirname):
         return self.voidcmd('RMD ' + dirname)
 
+    def nlst(self, *args):
+        '''Return a list of files in a given directory (default the current).'''
+        cmd = 'NLST'
+        for arg in args:
+            cmd = cmd + (' ' + arg)
+        files = []
+        self.retrlines(cmd, files.append)
+        return files
+
+    def mlsd(self, path="", facts=[]):
+        if facts:
+            self.sendcmd("OPTS MLST " + ";".join(facts) + ";")
+        if path:
+            cmd = "MLSD %s" % path
+        else:
+            cmd = "MLSD"
+        lines = []
+        self.retrlines(cmd, lines.append)
+        for line in lines:
+            facts_found, _, name = line.rstrip(CRLF).partition(' ')
+            entry = {}
+            for fact in facts_found[:-1].split(";"):
+                key, _, value = fact.partition("=")
+                entry[key.lower()] = value
+            yield (name, entry)
+
+    def format_size_(self, n_byte):
+        n_byte = int(n_byte)
+        KB, MB, GB = 2**10, 2**20, 2**30
+        if n_byte < KB:
+            return '{:>6} B  '.format(n_byte)
+        elif n_byte < MB:
+            return '{:>6} KiB'.format(n_byte // KB)
+        elif n_byte < GB:
+            return '{:>6} MiB'.format(n_byte // MB)
+        else:
+            return '{:>6} GiB'.format(n_byte // GB)
+
+    def pretty_mlsd(self, path=''):
+        file_list = self.mlsd(path=path, facts=["type", "size", "perm"])
+        for f in file_list:
+            print("{:<12}\t\t".format(f[1].get('perm', '---------')), end='')
+            print(f"{self.format_size_(f[1].get('size', -1))}\t\t", end='')
+            if f[1].get('type', 'none') == 'dir':
+                print(f'{BOLD}{f[0]}{ENDC}')
+            else:
+                print(f'{f[0]}')
+        print()
+
 
 def test():
     ftp = FTP('127.0.0.1','hatsu3','password')
@@ -489,7 +538,18 @@ if __name__ == '__main__':
             break
         elif cmd_type == 'ls':
             dirname = '.' if not cmd_args else cmd_args[0]
-            ftp_client.dir(dirname, print)
+            try:
+                ftp_client.dir(dirname, print)
+            except error_perm:
+                print_warning(f'{dirname}: No such directory')
+                continue
+        elif cmd_type == 'll':
+            dirname = '.' if not cmd_args else cmd_args[0]
+            try:
+                ftp_client.pretty_mlsd(dirname)
+            except error_perm:
+                print_warning(f'{dirname}: No such directory')
+                continue
         elif cmd_type == 'cd':
             dirname = '' if not cmd_args else cmd_args[0]
             print(f'Changing working directory to {dirname}')
@@ -497,6 +557,7 @@ if __name__ == '__main__':
                 ftp_client.cwd(dirname)
             except error_perm:
                 print_warning(f'{dirname}: No such directory')
+                continue
         elif cmd_type == 'pwd':
             print(f'Current working directory: {ftp_client.pwd()}')
         elif cmd_type == 'download_text':
