@@ -10,13 +10,15 @@ B_CRLF = b'\r\n'
 FTP_PORT = 21
 
 # https://stackoverflow.com/questions/287871/print-in-terminal-with-colors
-BOLD = '\033[1m'
-ENDC = '\033[0m'
-WARNING = '\033[93m'
-BGCOLOR = '\033[6;30;42m'
-UNDERLINE = '\033[4m'
-OKBLUE = '\033[94m'
-OKGREEN = '\033[92m'
+ENDC        = '\033[0m'
+BOLD        = '\033[1m'
+ITALIC      = '\033[3m'
+UNDERLINE   = '\033[4m'
+OKGREEN     = '\033[92m'
+WARNING     = '\033[93m'
+OKBLUE      = '\033[94m'
+BGCOLOR     = '\033[6;30;42m'
+
 
 # Exception raised when an error or invalid response is received
 class Error(Exception): pass
@@ -401,7 +403,7 @@ class FTP:
     def pretty_mlsd(self, path='', short=False):
         file_list = self.mlsd(path=path, facts=["type", "size", "perm"])
         for f in file_list:
-            if short and f[0].startswith('.'):
+            if f[0].startswith('.'):
                 continue
             if not short:
                 print("{:<12}\t\t".format(f[1].get('perm', '---------')), end='')
@@ -410,7 +412,6 @@ class FTP:
                 print(f'{BOLD}{f[0]}{ENDC}')
             else:
                 print(f'{f[0]}')
-        print()
 
 
 def test():
@@ -507,16 +508,21 @@ def parse257(resp):
 
 
 def print_warning(warning):
-    print(WARNING + warning + ENDC)
+    print(f'{BOLD}{WARNING}{ITALIC}[ERROR] {warning}{ENDC}')
+
+def print_info(info):
+    print(f'{BOLD}{ITALIC}[INFO]  {info}{ENDC}')
 
 def timeout_input(prompt, timeout=10):
-    if prompt:
-        print(prompt)
-    i, __, __ = select.select([sys.stdin], [], [], timeout)
-    if i:
-        return sys.stdin.readline().strip()
-    else:
-        return None
+    try:
+        if prompt:
+            print(prompt)
+        i, __, __ = select.select([sys.stdin], [], [], timeout)
+        return sys.stdin.readline().strip() if i else None
+    except e:
+        throw
+    finally:
+        print(ENDC, end='')
 
 if __name__ == '__main__':
     # run_ftp_server.py
@@ -550,90 +556,82 @@ if __name__ == '__main__':
 
     while True:
         # cmd = input(f'{UNDERLINE}{BOLD}FTP ➜ ').split()
-        prompt = f'{UNDERLINE}{BOLD}FTP {OKBLUE}{host}:{port} {OKGREEN}{os.getcwd()} ⌁ {ftp_client.pwd()} ➜'
+        print()
+        prompt = f'{UNDERLINE}{BOLD}FTP {OKBLUE}{host}:{port} {OKGREEN}{os.getcwd()} ⌁ {ftp_client.pwd()} ➜{ENDC}{UNDERLINE}{BOLD}'
         cmd = timeout_input(prompt, timeout=20)
         while cmd is None:
             ftp_client.send_noop()
             cmd = timeout_input('', timeout=20)
 
         cmd = cmd.split()
-        print(ENDC, end='')
         if not cmd:  # empty input
             continue
         cmd_type = cmd[0].lower()
         cmd_args = cmd[1:]
+
         if cmd_type == 'exit' or cmd_type == 'quit':
             ftp_client.quit()
             break
+
         elif cmd_type == 'll':
-            dirname = '.' if not cmd_args else cmd_args[0]
             try:
+                dirname = '.' if not cmd_args else cmd_args[0]
                 ftp_client.dir(dirname, print)
             except error_perm:
                 print_warning(f'{dirname}: No such directory')
-                print()
-                continue
+
         elif cmd_type == 'ls':
-            dirname = '.' if not cmd_args else cmd_args[0]
             try:
+                dirname = '.' if not cmd_args else cmd_args[0]
                 ftp_client.pretty_mlsd(dirname, short=True)
             except error_perm:
                 print_warning(f'{dirname}: No such directory')
-                print()
-                continue
+
         elif cmd_type == 'lh':
-            dirname = '.' if not cmd_args else cmd_args[0]
             try:
+                dirname = '.' if not cmd_args else cmd_args[0]
                 ftp_client.pretty_mlsd(dirname, short=False)
             except error_perm:
                 print_warning(f'{dirname}: No such directory')
-                print()
-                continue
+
         elif cmd_type == 'cd':
-            dirname = '' if not cmd_args else cmd_args[0]
-            print(f'Changing working directory to {dirname}')
             try:
+                dirname = '.' if not cmd_args else cmd_args[0]
+                print_info(f'Changing working directory to {dirname}')
                 ftp_client.cwd(dirname)
             except error_perm:
                 print_warning(f'{dirname}: No such directory')
-                continue
-            finally:
-                print()
+
         elif cmd_type == 'pwd':
-            print(f'Current working directory: {ftp_client.pwd()}')
-            print()
+            print_info(f'Current working directory: {ftp_client.pwd()}')
+
         elif cmd_type == 'download_text':
-            if len(cmd_args) != 1:
-                print('download <FILENAME>')
-                print()
-                continue
-            filename = cmd_args[0]
             try:
+                if len(cmd_args) != 1:
+                    print('download <FILENAME>')
+                    continue
+                filename = cmd_args[0]
                 ftp_client.retrlines(f'RETR {filename}', callback=print)
+                remote_path = Path(ftp_client.pwd()) / filename
+                print_info(f'Downloaded text file {remote_path}')
             except error_perm:
                 print_warning(f'{filename}: No such directory')
-                print()
-                continue
-            remote_path = Path(ftp_client.pwd()) / filename
-            print(f'Downloaded text file {remote_path}')
-            print()
+
         elif cmd_type == 'store_text':
             if len(cmd_args) != 1:
                 print('store <FILENAME>')
-                print()
                 continue
             filename = cmd_args[0]
             file_path = Path(filename)
-            print(f'Checking {file_path}...')
+            print_info(f'Checking {file_path}...')
             if not file_path.is_file():
-                print(f'{WARNING}No such file{ENDC}')
-                print()
+                print_warning(f'No such file')
                 continue
             fp = file_path.open(mode='rb')
             ftp_client.storlines(f'STOR {filename}', fp=fp, callback=None)
             remote_path = Path(ftp_client.pwd()) / Path(filename).name
-            print(f'{filename} saved at {remote_path}')
-            print()
+            print_info(f'{filename} saved at {remote_path}')
+
         elif cmd_type == 'help':
             print('''
             - exit
@@ -649,135 +647,128 @@ if __name__ == '__main__':
             - sz <FILENAME>
             - rm <FILENAME>
             - ccd <PATH>
+            - cpwd
+            - cls
             ''')
-            print()
+
         elif cmd_type == 'download':
             # download binary files
-            if len(cmd_args) != 1:
-                print('download <FILENAME>')
-                print()
-                continue
-            filename = cmd_args[0]
-            local_path = Path(filename).name
             try:
+                if len(cmd_args) != 1:
+                    print('download <FILENAME>')
+                    continue
+                filename = cmd_args[0]
+                local_path = Path(filename).name
                 sz = ftp_client.size(filename)
                 blocksize = 8192
                 n_block = sz // blocksize + 1
                 with open(local_path, 'wb') as fp:
                     ftp_client.retrbinary(f'RETR {filename}', callback=(lambda x: fp.write(x)), \
                                           blocksize=blocksize, n_block=n_block)
+                remote_path = Path(ftp_client.pwd()) / filename
+                print_info(f'Downloaded binary file {remote_path}')
             except error_perm:
                 print_warning(f'{filename}: No such directory')
-                print()
-                continue
-            remote_path = Path(ftp_client.pwd()) / filename
-            print(f'Downloaded binary file {remote_path}')
-            print()
+
         elif cmd_type == 'store':
             # uploas binary files
             if len(cmd_args) != 1:
                 print('store <FILENAME>')
-                print()
                 continue
             filename = cmd_args[0]
             file_path = Path(filename)
-            print(f'Checking {file_path}...')
+            print_info(f'Checking {file_path}...')
             if not file_path.is_file():
                 print_warning(f'{filename}: No such file')
-                print()
                 continue
             sz = os.path.getsize(filename)
-            print(sz)
             blocksize = 8192
             n_block = sz // blocksize + 1
             fp = file_path.open(mode='rb')
             ftp_client.storbinary(f'STOR {filename}', fp=fp, callback=None, \
-                                  blocksize=blocksize, n_block=n_block)
+                                blocksize=blocksize, n_block=n_block)
             remote_path = Path(ftp_client.pwd()) / Path(filename).name
-            print(f'{filename} saved at {remote_path}')
-            print()
+            print_info(f'{filename} saved at {remote_path}')
+
         elif cmd_type == 'rm':
-            if len(cmd_args) != 1:
-                print('rm <FILENAME>')
-                print()
-                continue
-            filename = cmd_args[0]
             try:
+                if len(cmd_args) != 1:
+                    print('rm <FILENAME>')
+                    continue
+                filename = cmd_args[0]
                 ftp_client.delete(filename)
+                remote_path = Path(ftp_client.pwd()) / filename
+                print_info(f'Deleted {remote_path}')
             except error_perm:
                 print_warning(f'{filename}: No such file')
-                print()
-                continue
-            remote_path = Path(ftp_client.pwd()) / filename
-            print(f'Deleted {remote_path}')
-            print()
+
         elif cmd_type == 'mkdir':
             if len(cmd_args) != 1:
                 print('mkdir <DIRNAME>')
-                print()
                 continue
             dirname = cmd_args[0]
             ftp_client.mkd(dirname)
-            print(f'Created directory {dirname}')
-            print()
+            print_info(f'Created directory {dirname}')
+
         elif cmd_type == 'rmdir':
-            if len(cmd_args) != 1:
-                print('rmdir <DIRNAME>')
-                print()
-                continue
-            dirname = cmd_args[0]
             try:
+                if len(cmd_args) != 1:
+                    print('rmdir <DIRNAME>')
+                    continue
+                dirname = cmd_args[0]
                 ftp_client.rmd(dirname)
+                print_info(f'Deleted directory {dirname}')
             except error_perm:
                 print_warning(f'{dirname}: No such directory')
-                print()
-                continue
-            print(f'Deleted directory {dirname}')
-            print()
+
         elif cmd_type == 'rename':
-            if len(cmd_args) != 2:
-                print('rename <FROM_NAME> <TO_NAME>')
-                continue
-            from_name, to_name = cmd_args
             try:
+                if len(cmd_args) != 2:
+                    print('rename <FROM_NAME> <TO_NAME>')
+                    continue
+                from_name, to_name = cmd_args
                 ftp_client.rename(from_name, to_name)
+                print_info(f'Renamed {from_name} to {to_name}')
             except error_perm:
                 print_warning(f'{from_name}: No such file or directory')
-                print()
-                continue
-            print(f'Renamed {from_name} to {to_name}')
-            print()
+
         elif cmd_type == 'sz':
-            if len(cmd_args) != 1:
-                print('sz <FILENAME>')
-                continue
-            filename = cmd_args[0]
             try:
+                if len(cmd_args) != 1:
+                    print('sz <FILENAME>')
+                    continue
+                filename = cmd_args[0]
                 sz = ftp_client.size(filename)
+                print_info(f'Size of {filename} is {sz} bytes')
             except error_perm:
                 print_warning(f'{filename}: No such file or directory')
-                print()
-                continue
-            print(f'Size of {filename} is {sz} bytes')
-            print()
+
         elif cmd_type == 'ccd':
-            if len(cmd_args) != 1:
-                print('ccd <PATH>')
-                print()
-                continue
-            new_path = cmd_args[0]
             try:
+                if len(cmd_args) != 1:
+                    print('ccd <PATH>')
+                    continue
+                new_path = cmd_args[0]
                 os.chdir(new_path)
-                print(f'[client] Working directory changed to {os.getcwd()}')
+                print_info(f'[client] Working directory changed to {os.getcwd()}')
+            except FileNotFoundError:
+                print_warning(f'{new_path}: No such directory')
             except:
                 print_warning(f'Failed to cd to {new_path}')
-            finally:
-                print()
-        elif cmd_type == 'ccwd':
+
+        elif cmd_type == 'cpwd':
             print(f'[client] Current working directory is {os.getcwd()}')
+
+        elif cmd_type == 'cls':
+            for f in os.listdir('.'):
+                if f.startswith('.'):
+                    continue
+                sz = os.path.getsize(f)
+                print_info(ftp_client.format_size_(sz) + '\t\t', end='')
+                print(f if os.path.isfile(f) else f'{BOLD}{f}{ENDC}')
+        
         else:
-            print('Invalid command. Try help')
-            print()
+            print_warning('Invalid command. Try help')
 
     # filename = input('Which file to retrieve: ')
     # # <- Users/hatsu3/Documents/GitHub/ftpclient/ftp.py
