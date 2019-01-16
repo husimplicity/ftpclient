@@ -1,4 +1,4 @@
-from ftp import FTP
+import ftp
 import sys    
 import os.path
 
@@ -8,70 +8,75 @@ import os.path
 ##ftp_download用于从远程服务器下载数据，其中实现断点续传
 ##！！老哥们，我在test的时候不知道为什么connect不上，求帮助。因为这个原因debug不了后面。。。里面肯定还有不少bug。。。
     
-class my_FTP(FTP):    
+class my_FTP(ftp.FTP):    
         def __init__(self):
+            super().__init__()
             print("A FTP is established.")
+
         ##补充我们没有实现的FTP模块
-        def cwd(self, dirname):
-            if dirname == '..':
-                try:
-                    return self.voidcmd('CDUP')
-                except error_perm as msg:
-                    if msg.args[0][:3] != '500':
-                        raise
-            elif dirname == '':
-                dirname = '.'  # does nothing, but could return error
-            cmd = 'CWD ' + dirname
-            return self.voidcmd(cmd)
+        # def cwd(self, dirname):
+        #     if dirname == '..':
+        #         try:
+        #             return self.voidcmd('CDUP')
+        #         except error_perm as msg:
+        #             if msg.args[0][:3] != '500':
+        #                 raise
+        #     elif dirname == '':
+        #         dirname = '.'  # does nothing, but could return error
+        #     cmd = 'CWD ' + dirname
+        #     return self.voidcmd(cmd)
         
-        def ntransfercmd(self, cmd, rest=None):
-            size = None
-            if self.passiveserver:
-                host, port = self.makepasv()
-                conn = socket.create_connection((host, port), self.timeout,
-                                            source_address=self.source_address)
-                try:
-                    if rest is not None:
-                        self.sendcmd("REST %s" % rest)
-                    resp = self.sendcmd(cmd)
-                    if resp[0] == '2':
-                        resp = self.getresp()
-                    if resp[0] != '1':
-                        raise error_reply(resp)
-                except:
-                    conn.close()
-                    raise
-            else:
-                with self.makeport() as sock:
-                    if rest is not None:
-                        self.sendcmd("REST %s" % rest)
-                    resp = self.sendcmd(cmd)
-                    if resp[0] == '2':
-                        resp = self.getresp()
-                    if resp[0] != '1':
-                        raise error_reply(resp)
-                    conn, sockaddr = sock.accept()
-                    if self.timeout is not _GLOBAL_DEFAULT_TIMEOUT:
-                        conn.settimeout(self.timeout)
-            if resp[:3] == '150':
-                # this is conditional in case we received a 125
-                size = parse150(resp)
-            return conn, size
+        # def ntransfercmd(self, cmd, rest=None):
+        #     size = None
+        #     if self.passiveserver:
+        #         host, port = self.makepasv()
+        #         conn = socket.create_connection((host, port), self.timeout,
+        #                                     source_address=self.source_address)
+        #         try:
+        #             if rest is not None:
+        #                 self.sendcmd("REST %s" % rest)
+        #             resp = self.sendcmd(cmd)
+        #             if resp[0] == '2':
+        #                 resp = self.getresp()
+        #             if resp[0] != '1':
+        #                 raise error_reply(resp)
+        #         except:
+        #             conn.close()
+        #             raise
+        #     else:
+        #         with self.makeport() as sock:
+        #             if rest is not None:
+        #                 self.sendcmd("REST %s" % rest)
+        #             resp = self.sendcmd(cmd)
+        #             if resp[0] == '2':
+        #                 resp = self.getresp()
+        #             if resp[0] != '1':
+        #                 raise error_reply(resp)
+        #             conn, sockaddr = sock.accept()
+        #             if self.timeout is not _GLOBAL_DEFAULT_TIMEOUT:
+        #                 conn.settimeout(self.timeout)
+        #     if resp[:3] == '150':
+        #         # this is conditional in case we received a 125
+        #         size = parse150(resp)
+        #     return conn, size
         
-        def transfercmd(self, cmd, rest=None):
-            """Like ntransfercmd() but returns only the socket."""
-            return self.ntransfercmd(cmd, rest)[0]
+        # def transfercmd(self, cmd, rest=None):
+        #     """Like ntransfercmd() but returns only the socket."""
+        #     return self.ntransfercmd(cmd, rest)[0]
         
         ##与服务器连接并登陆
         def ftp_login(self,host_ip,host_port,username,password):
-                ftp=my_FTP()
-                try:  
-                    ftp.connect(host_ip,host_port,timeout=100)  
-                except :
+                # ftp=my_FTP()
+                print(f'self.connect({host_ip},{host_port})')
+                print(f'self.login(user={username},passwd={password})')
+                try: 
+                    self.connect(host_ip,host_port) #,timeout=100)  
+                except Exception as e:
+                    print(e)
                     print('连接失败')
                     return [0,'failed']   
                 try:    
-                    ftp.login(user=username,passwd=password)    
+                    self.login(user=username,passwd=password)    
                 except:
                     print('用户名或密码错误')
                     return [0,'failed']  
@@ -111,7 +116,8 @@ class my_FTP(FTP):
                 ftp.quit()
 def test():
     ftp=my_FTP()
-    ftp.ftp_login('127.0.0.1','21','','') 
-    ftp.ftp_download('127.0.0.1','21','','','/remote','/local/local_file') 
+    ftp.ftp_login('127.0.0.1','8821','hatsu3','password') 
+    # ftp.ftp_download('127.0.0.1','21','','','/remote','/local/local_file') 
 
 test()
+

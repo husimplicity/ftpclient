@@ -24,9 +24,11 @@ class FTP:
     welcome = None
     passiveserver = 1
     maxline = MAXLINE
+    
 
     def __init__(self, host=None, user=None, passwd=None, acct=None,
                  timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None):
+        print('self defined')
         self.source_address = source_address
         self.encoding = 'latin-1'  # Extended ASCII
         self.timeout = timeout
@@ -73,7 +75,8 @@ class FTP:
         # Convenience function: socket -> bind -> connect
         self.sock = socket.create_connection(
             host_addr, timeout=self.timeout, source_address=self.source_address)
-        
+        # self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+
         # necessary
         self.af = self.sock.family
 
