@@ -43,7 +43,7 @@ class FTP:
         """Expect a response beginning with '2'."""
         resp = self.getresp()
         if resp[:1] != '2':
-            raise error_reply(resp)
+            raise error_reply(resp)  # empty exception
         return resp
 
     def login(self, user='', passwd='', acct=''):
@@ -238,6 +238,28 @@ class FTP:
             host, port = parse229(self.sendcmd('EPSV'), self.sock.getpeername())
         return host, port
 
+    def cwd(self, dirname):
+        '''Change current working directory
+
+        Arguments:
+            dirname {str} -- > cd <dirname>
+        '''
+        if dirname == '..':
+            try:
+                return self.voidcmd('CDUP')
+            except Error:
+                pass
+        elif dirname == '':
+            dirname = '.'
+        cmd = f'CWD {dirname}'
+        return self.voidcmd(cmd)  # expect 2xx response
+
+    def pwd(self):
+        '''Return current working directory
+        '''
+        resp = self.voidcmd('PWD')
+        return parse257(resp)
+
 def test():
     ftp = FTP('127.0.0.1','hatsu3','password')
     resp = ftp.sendcmd("")
@@ -306,7 +328,27 @@ def parse229(resp, peer):
     port = int(parts[3])
     return host, port
 
+def parse257(resp):
+    '''Parse the '257' response for a MKD or PWD request.
+    This is a response to a MKD or PWD request: a directory name.
+    Returns the directoryname in the 257 reply.'''
 
+    if resp[:3] != '257':
+        raise error_reply(resp)
+    if resp[3:5] != ' "':
+        return '' # Not compliant to RFC 959, but UNIX ftpd does this
+    dirname = ''
+    i = 5
+    n = len(resp)
+    while i < n:
+        c = resp[i]
+        i = i+1
+        if c == '"':
+            if i >= n or resp[i] != '"':
+                break
+            i = i+1
+        dirname = dirname + c
+    return dirname
 
 # test() 
 
@@ -332,7 +374,7 @@ if __name__ == '__main__':
     # -> 331 Username ok, send password.
     # -> 30 Login successful.
 
-    ftp_client.dir('.', print)  # ftp_client.dir('./Library')
+    # ftp_client.dir('.', print)  # ftp_client.dir('./Library')
     # -> 200 Type set to: ASCII.
     # -> 227 Entering passive mode (127,0,0,1,204,237).
     # -> 125 Data connection already open. Transfer starting.
@@ -341,16 +383,54 @@ if __name__ == '__main__':
     # -> drwx------   2 hatsu3   staff          64 Dec 26 16:19 .CMVolumes
     # -> <OMITTED> ...
 
-    filename = input('Which file to retrieve: ')
-    # <- Users/hatsu3/Documents/GitHub/ftpclient/ftp.py
-    ftp_client.retrlines('RETR ' + filename, callback=print)
-    # -> 200 Type set to: ASCII.
-    # -> 227 Entering passive mode (127,0,0,1,243,131).
-    # -> 125 Data connection already open. Transfer starting.
-    # -> import socket
-    # -> <OMITTED> ...
-    # -> 226 Transfer complete.
+    while True:
+        cmd = input('FTP > ').split()
+        if not cmd:  # empty input
+            continue
+        cmd_type = cmd[0].lower()
+        cmd_args = cmd[1:]
+        if cmd_type == 'exit' or cmd_type == 'quit':
+            ftp_client.quit()
+            break
+        elif cmd_type == 'ls':
+            dirname = '.' if not cmd_args else cmd_args[0]
+            ftp_client.dir('.', print)
+        elif cmd_type == 'cd':
+            dirname = '' if not cmd_args else cmd_args[0]
+            print(f'Changing working directory to {dirname}')
+            try:
+                ftp_client.cwd(dirname)
+            except error_perm:
+                print('No such file or directory')
+        elif cmd_type == 'pwd':
+            print(f'Current working directory: {ftp_client.pwd()}')
+        elif cmd_type == 'download':
+            if not cmd_args:
+                print('download <FILENAME>')
+                continue
+            filename = cmd_args[0]
+            ftp_client.retrlines('RETR ' + filename, callback=print)
+        elif cmd_type == 'help':
+            print('''
+            - exit
+            - ls </./../DIRNAME>
+            - cd </./../DIRNAME>
+            - pwd
+            - download <FILENAME>
+            - help
+            ''')
+        else:
+            print('Invalid command. Try help')
+    # filename = input('Which file to retrieve: ')
+    # # <- Users/hatsu3/Documents/GitHub/ftpclient/ftp.py
+    # ftp_client.retrlines('RETR ' + filename, callback=print)
+    # # -> 200 Type set to: ASCII.
+    # # -> 227 Entering passive mode (127,0,0,1,243,131).
+    # # -> 125 Data connection already open. Transfer starting.
+    # # -> import socket
+    # # -> <OMITTED> ...
+    # # -> 226 Transfer complete.
 
-    ftp_client.quit()
-    # -> 21 Goodbye.
+    # ftp_client.quit()
+    # # -> 21 Goodbye.
 
