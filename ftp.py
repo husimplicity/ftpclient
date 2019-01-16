@@ -542,10 +542,10 @@ if __name__ == '__main__':
         # cmd = input(f'{UNDERLINE}{BOLD}FTP ➜ ').split()
         prompt = f'{UNDERLINE}{BOLD}FTP ➜ '
         cmd = timeout_input(prompt, timeout=20)
-        if cmd is None:
-            # print('sending noop')
+        while cmd is None:
             ftp_client.send_noop()
-            continue
+            cmd = timeout_input('', timeout=20)
+
         cmd = cmd.split()
         print(ENDC, end='')
         if not cmd:  # empty input
