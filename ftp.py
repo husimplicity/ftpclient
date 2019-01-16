@@ -1,13 +1,20 @@
-import socket
 import os
 import sys
 import select
-from tqdm import tqdm
+import socket
 from pathlib import Path
 
-CRLF = '\r\n'
-B_CRLF = b'\r\n'
-FTP_PORT = 21
+from tqdm import tqdm
+
+
+
+
+CRLF        = '\r\n'
+B_CRLF      = b'\r\n'
+FTP_PORT    = 21
+MAXLINE     = 8192
+_227_re     = None
+
 
 # https://stackoverflow.com/questions/287871/print-in-terminal-with-colors
 ENDC        = '\033[0m'
@@ -21,35 +28,73 @@ BGCOLOR     = '\033[6;30;42m'
 
 
 # Exception raised when an error or invalid response is received
-class Error(Exception): pass
-class error_reply(Error): pass          # unexpected [123]xx reply
-class error_temp(Error): pass           # 4xx errors
-class error_perm(Error): pass           # 5xx errors
-class error_proto(Error): pass          # response does not begin with [1-5]
+class Error(Exception):     pass
+class error_reply(Error):   pass          # unexpected [123]xx reply
+class error_temp(Error):    pass          # 4xx errors
+class error_perm(Error):    pass          # 5xx errors
+class error_proto(Error):   pass          # response does not begin with [1-5]
 all_errors = {Error, IOError, EOFError}
 
-MAXLINE = 8192
+
+
+
 class FTP:
-    host = ''
-    port = FTP_PORT
-    sock = None
-    file = None
-    welcome = None
-    passiveserver = 1
-    maxline = MAXLINE
-
-
     def __init__(self, host=None, user=None, passwd=None, acct=None,
                  timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None):
+        self.host           = ''
+        self.port           = FTP_PORT
+        self.sock           = None
+        self.file           = None
+        self.welcome        = None
+        self.passiveserver  = 1
+        self.maxline        = MAXLINE
         self.source_address = source_address
-        self.encoding = 'latin-1'  # Extended ASCII
-        self.timeout = timeout
-        # self.host, self.port, self.sock, self.file, self.welcome
+        self.encoding       = 'latin-1'  # Extended ASCII
+        self.timeout        = timeout
 
         if host:
             self.connect(host)
             if user:
                 self.login(user, passwd, acct)
+
+    def putline(self, cmd):
+        cmd = cmd + CRLF
+        self.sock.sendall(cmd.encode(self.encoding))
+
+    # RFC-959 Page 35
+    def getline(self):
+        line = self.file.readline()
+        if not line:
+            raise EOFError
+        if line[-2:] == CRLF:
+            line = line[:2]
+        elif line[-1:] in CRLF:
+            line = line[:-1]
+        # print(line)
+        return line
+
+    def getmultiline(self):
+        line = self.getline()
+        if line[3:4] == '-':
+            code = line[:3]
+            while 1:
+                nextline = self.getline()
+                line = line + ('\n' + nextline)
+                if nextline[:3] == code and nextline[3:4] != '-':
+                    break;
+        return line
+
+    def getresp(self):
+        resp = self.getmultiline()
+        self.lastresp = resp[:3]
+        c = resp[:1]
+        if c in {'1','2','3'}:
+            return resp
+        if c == '4':
+            raise error_temp(resp)
+        if c == '5':
+            raise error_perm(resp)
+        raise error_proto(resp)
 
     def send_noop(self):
         # https://stackoverflow.com/questions/15170503/checking-a-python-ftp-connection
@@ -59,12 +104,22 @@ class FTP:
         self.putline(cmd)
         return self.getresp()
 
+    def voidcmd(self, cmd):
+        self.putline(cmd)
+        resp = self.getresp()
+        if resp[:1] != '2':
+            raise error_reply(resp)
+        return resp
+
     def voidresp(self):
         """Expect a response beginning with '2'."""
         resp = self.getresp()
         if resp[:1] != '2':
             raise error_reply(resp)  # empty exception
         return resp
+
+
+
 
     def login(self, user='', passwd='', acct=''):
         if not user: user = 'anonymous'
@@ -101,174 +156,28 @@ class FTP:
         self.welcome = self.getresp()
         return self.welcome
 
-    def putline(self, cmd):
-        cmd = cmd + CRLF
-        self.sock.sendall(cmd.encode(self.encoding))
+    def sendport(self, host, port):
+        '''Send a PORT command with the current host and the given
+        port number.
+        '''
+        hbytes = host.split('.')
+        pbytes = [repr(port//256), repr(port%256)]
+        bytes = hbytes + pbytes
+        cmd = 'PORT ' + ','.join(bytes)
+        return self.voidcmd(cmd)
 
-    def getresp(self):
-        resp = self.getmultiline()
-        self.lastresp = resp[:3]
-        c = resp[:1]
-        if c in {'1','2','3'}:
-            return resp
-        if c == '4':
-            raise error_temp(resp)
-        if c == '5':
-            raise error_perm(resp)
-        raise error_proto(resp)
-
-    # RFC-959 Page 35
-    def getline(self):
-        line = self.file.readline()
-        if not line:
-            raise EOFError
-        if line[-2:] == CRLF:
-            line = line[:2]
-        elif line[-1:] in CRLF:
-            line = line[:-1]
-        # print(line)
-        return line
-
-    def getmultiline(self):
-        line = self.getline()
-        if line[3:4] == '-':
-            code = line[:3]
-            while 1:
-                nextline = self.getline()
-                line = line + ('\n' + nextline)
-                if nextline[:3] == code and nextline[3:4] != '-':
-                    break;
-        return line
-
-    def voidcmd(self, cmd):
-        self.putline(cmd)
-        resp = self.getresp()
-        if resp[:1] != '2':
-            raise error_reply(resp)
-        return resp
-
-    def quit(self):
-        resp = self.voidcmd('QUIT')
-        if self.file:
-            self.file.close()
-            self.sock.close()
-            self.file = None
-            self.sock = None
-        return resp
-
-    def dir(self, *args):
-        callback = None
-        if args[-1:] and type(args[-1]) != type(''):
-            args, callback = args[:-1], args[-1]
-        cmd = ' '.join(['LIST', *args])
-        self.retrlines(cmd, callback)
-
-    def retrlines(self, cmd, callback=None):
-        if callback is None:
-            callback = print
-        resp = self.sendcmd('TYPE A')
-        # num_lines = sum(1 for l in open('ftp.py', 'r'))
-        with self.transfercmd(cmd) as conn, \
-                 conn.makefile('r', encoding=self.encoding) as fp:
-            # import time
-            # for i in tqdm(range(num_lines + 1)):
-            while True:
-                # time.sleep(0.02)
-                line = fp.readline(self.maxline + 1)
-                if len(line) > self.maxline:
-                    raise Error("got more than %d bytes" % self.maxline)
-                if not line:
-                    break
-                if line[-2:] == CRLF:
-                    line = line[:-2]
-                elif line[-1:] == '\n':
-                    line = line[:-1]
-                callback(line);
-                # self.send_noop();
-        return self.voidresp()
-
-    def storlines(self, cmd, fp, callback=None):
-        self.voidcmd('TYPE A')
-        with self.transfercmd(cmd) as conn:
-            while True:
-                buf = fp.readline(self.maxline + 1)
-                if not buf:
-                    break
-                if buf[-2:] != B_CRLF:
-                    if buf[-1] in B_CRLF: buf = buf[:-1]
-                    buf = buf + B_CRLF
-                conn.sendall(buf)
-                if callback:
-                    callback(buf)
-                
-
-        return self.voidresp()
-
-    def retrbinary(self, cmd, callback, n_block, blocksize=8192, rest=None):
-        self.voidcmd('TYPE I')
-        with self.transfercmd(cmd, rest) as conn:
-            # while 1:
-            for i in tqdm(range(n_block + 1)):
-                data = conn.recv(blocksize)
-                if not data:
-                    break
-                callback(data)
-                if (i + 1) % 5 == 0:
-                    self.send_noop()
-        return self.voidresp()
-
-    def storbinary(self, cmd, fp, n_block, blocksize=8192, callback=None, rest=None):
-        self.voidcmd('TYPE I')
-        with self.transfercmd(cmd, rest) as conn:
-            # while 1:
-            for i in tqdm(range(n_block + 1)):
-                buf = fp.read(blocksize)
-                if not buf:
-                    break
-                conn.sendall(buf)
-                if callback:
-                    callback(buf)
-                if (i + 1) % 5 == 0:
-                    self.send_noop()
-        return self.voidresp()
-
-    def ntransfercmd(self, cmd, rest=None):
-        size = None
-        if self.passiveserver:
-            host, port = self.makepasv()
-            conn = socket.create_connection((host, port), self.timeout,
-                                            source_address=self.source_address)
-            try:
-                if rest is not None:
-                    self.sendcmd("REST %s" % rest)
-                resp = self.sendcmd(cmd)
-                if resp[0] == '2':
-                    resp = self.getresp()
-                if resp[0] != '1':
-                    raise error_reply(resp)
-            except:
-                conn.close()
-                raise
-        else:
-            with self.makeport() as sock:
-                if rest is not None:
-                    self.sendcmd("REST %s" % rest)
-                resp = self.sendcmd(cmd)
-                # See above.
-                if resp[0] == '2':
-                    resp = self.getresp()
-                if resp[0] != '1':
-                    raise error_reply(resp)
-                conn, sockaddr = sock.accept()
-                if self.timeout is not _GLOBAL_DEFAULT_TIMEOUT:
-                    conn.settimeout(self.timeout)
-        if resp[:3] == '150':
-            # this is conditional in case we received a 125
-            size = parse150(resp)
-        return conn, size
-
-    def transfercmd(self, cmd, rest=None):
-        return self.ntransfercmd(cmd, rest)[0]
+    def sendeprt(self, host, port):
+        '''Send an EPRT command with the current host and the given port number.'''
+        af = 0
+        if self.af == socket.AF_INET:
+            af = 1
+        if self.af == socket.AF_INET6:
+            af = 2
+        if af == 0:
+            raise error_proto('unsupported address family')
+        fields = ['', repr(af), host, repr(port), '']
+        cmd = 'EPRT ' + '|'.join(fields)
+        return self.voidcmd(cmd)
 
     def makeport(self):
         err = None
@@ -308,21 +217,119 @@ class FTP:
             host, port = parse229(self.sendcmd('EPSV'), self.sock.getpeername())
         return host, port
 
-    def cwd(self, dirname):
-        '''Change current working directory
-
-        Arguments:
-            dirname {str} -- > cd <dirname>
-        '''
-        if dirname == '..':
+    def ntransfercmd(self, cmd, rest=None):
+        size = None
+        if self.passiveserver:
+            host, port = self.makepasv()
+            conn = socket.create_connection((host, port), self.timeout,
+                                            source_address=self.source_address)
             try:
-                return self.voidcmd('CDUP')
-            except Error:
-                pass
-        elif dirname == '':
-            dirname = '.'
-        cmd = f'CWD {dirname}'
-        return self.voidcmd(cmd)  # expect 2xx response
+                if rest is not None:
+                    self.sendcmd("REST %s" % rest)
+                resp = self.sendcmd(cmd)
+                if resp[0] == '2':
+                    resp = self.getresp()
+                if resp[0] != '1':
+                    raise error_reply(resp)
+            except:
+                conn.close()
+                raise
+        else:
+            with self.makeport() as sock:
+                if rest is not None:
+                    self.sendcmd("REST %s" % rest)
+                resp = self.sendcmd(cmd)
+                # See above.
+                if resp[0] == '2':
+                    resp = self.getresp()
+                if resp[0] != '1':
+                    raise error_reply(resp)
+                conn, sockaddr = sock.accept()
+                if self.timeout is not _GLOBAL_DEFAULT_TIMEOUT:
+                    conn.settimeout(self.timeout)
+        if resp[:3] == '150':
+            # this is conditional in case we received a 125
+            size = parse150(resp)
+        return conn, size
+
+    def transfercmd(self, cmd, rest=None):
+        return self.ntransfercmd(cmd, rest)[0]
+
+
+
+
+    def retrlines(self, cmd, callback=None):
+        if callback is None:
+            callback = print
+        resp = self.sendcmd('TYPE A')
+        # num_lines = sum(1 for l in open('ftp.py', 'r'))
+        with self.transfercmd(cmd) as conn, \
+                 conn.makefile('r', encoding=self.encoding) as fp:
+            # import time
+            # for i in tqdm(range(num_lines + 1)):
+            while True:
+                # time.sleep(0.02)
+                line = fp.readline(self.maxline + 1)
+                if len(line) > self.maxline:
+                    raise Error("got more than %d bytes" % self.maxline)
+                if not line:
+                    break
+                if line[-2:] == CRLF:
+                    line = line[:-2]
+                elif line[-1:] == '\n':
+                    line = line[:-1]
+                callback(line);
+                # self.send_noop();
+        return self.voidresp()
+
+    def storlines(self, cmd, fp, callback=None):
+        self.voidcmd('TYPE A')
+        with self.transfercmd(cmd) as conn:
+            while True:
+                buf = fp.readline(self.maxline + 1)
+                if not buf:
+                    break
+                if buf[-2:] != B_CRLF:
+                    if buf[-1] in B_CRLF: buf = buf[:-1]
+                    buf = buf + B_CRLF
+                conn.sendall(buf)
+                if callback:
+                    callback(buf)
+
+
+        return self.voidresp()
+
+    def retrbinary(self, cmd, callback, n_block, blocksize=8192, rest=None):
+        self.voidcmd('TYPE I')
+        with self.transfercmd(cmd, rest) as conn:
+            # while 1:
+            for i in tqdm(range(n_block + 1)):
+                data = conn.recv(blocksize)
+                if not data:
+                    break
+                callback(data)
+                if (i + 1) % 5 == 0:
+                    self.send_noop()
+        return self.voidresp()
+
+    def storbinary(self, cmd, fp, n_block, blocksize=8192, callback=None, rest=None):
+        self.voidcmd('TYPE I')
+        with self.transfercmd(cmd, rest) as conn:
+            # while 1:
+            for i in tqdm(range(n_block + 1)):
+                buf = fp.read(blocksize)
+                if not buf:
+                    break
+                conn.sendall(buf)
+                if callback:
+                    callback(buf)
+                if (i + 1) % 5 == 0:
+                    self.send_noop()
+        return self.voidresp()
+
+
+
+
 
     def pwd(self):
         '''Return current working directory
@@ -330,37 +337,12 @@ class FTP:
         resp = self.voidcmd('PWD')
         return parse257(resp)
 
-    def rename(self, fromname, toname):
-        resp = self.sendcmd('RNFR ' + fromname)
-        if resp[0] != '3':
-            raise error_reply(resp)
-        return self.voidcmd('RNTO ' + toname)
-
-    def delete(self, filename):
-        resp = self.sendcmd('DELE ' + filename)
-        if resp[:3] in {'250', '200'}:
-            return resp
-        else:
-            raise error_reply(resp)
-
-    def size(self, filename):
-        self.voidcmd('TYPE I')
-        # The SIZE command is defined in RFC-3659
-        resp = self.sendcmd('SIZE ' + filename)
-        if resp[:3] == '213':
-            s = resp[3:].strip()
-            return int(s)
-
-    def mkd(self, dirname):
-        resp = self.voidcmd('MKD ' + dirname)
-        # fix around non-compliant implementations such as IIS shipped
-        # with Windows server 2003
-        if not resp.startswith('257'):
-            return ''
-        return parse257(resp)
-
-    def rmd(self, dirname):
-        return self.voidcmd('RMD ' + dirname)
+    def dir(self, *args):
+        callback = None
+        if args[-1:] and type(args[-1]) != type(''):
+            args, callback = args[:-1], args[-1]
+        cmd = ' '.join(['LIST', *args])
+        self.retrlines(cmd, callback)
 
     def nlst(self, *args):
         '''Return a list of files in a given directory (default the current).'''
@@ -388,6 +370,69 @@ class FTP:
                 entry[key.lower()] = value
             yield (name, entry)
 
+    def size(self, filename):
+        self.voidcmd('TYPE I')
+        # The SIZE command is defined in RFC-3659
+        resp = self.sendcmd('SIZE ' + filename)
+        if resp[:3] == '213':
+            s = resp[3:].strip()
+            return int(s)
+
+
+
+
+    def cwd(self, dirname):
+        '''Change current working directory
+
+        Arguments:
+            dirname {str} -- > cd <dirname>
+        '''
+        if dirname == '..':
+            try:
+                return self.voidcmd('CDUP')
+            except Error:
+                pass
+        elif dirname == '':
+            dirname = '.'
+        cmd = f'CWD {dirname}'
+        return self.voidcmd(cmd)  # expect 2xx response
+
+    def rename(self, fromname, toname):
+        resp = self.sendcmd('RNFR ' + fromname)
+        if resp[0] != '3':
+            raise error_reply(resp)
+        return self.voidcmd('RNTO ' + toname)
+
+    def mkd(self, dirname):
+        resp = self.voidcmd('MKD ' + dirname)
+        # fix around non-compliant implementations such as IIS shipped
+        # with Windows server 2003
+        if not resp.startswith('257'):
+            return ''
+        return parse257(resp)
+
+    def rmd(self, dirname):
+        return self.voidcmd('RMD ' + dirname)
+
+    def delete(self, filename):
+        resp = self.sendcmd('DELE ' + filename)
+        if resp[:3] in {'250', '200'}:
+            return resp
+        else:
+            raise error_reply(resp)
+
+    def quit(self):
+        resp = self.voidcmd('QUIT')
+        if self.file:
+            self.file.close()
+            self.sock.close()
+            self.file = None
+            self.sock = None
+        return resp
+
+
+
+
     def format_size_(self, n_byte):
         n_byte = int(n_byte)
         KB, MB, GB = 2**10, 2**20, 2**30
@@ -414,11 +459,7 @@ class FTP:
                 print(f'{f[0]}')
 
 
-def test():
-    ftp = FTP('127.0.0.1','hatsu3','password')
-    resp = ftp.sendcmd("")
-    print(repr(resp))
-    ftp.quit()
+
 
 
 def parse150(resp):
@@ -438,9 +479,6 @@ def parse150(resp):
         return None
     return int(m.group(1))
 
-
-_227_re = None
-
 def parse227(resp):
     '''Parse the '227' response for a PASV request.
     Raises error_proto if it does not contain '(h1,h2,h3,h4,p1,p2)'
@@ -459,7 +497,6 @@ def parse227(resp):
     host = '.'.join(numbers[:4])
     port = (int(numbers[4]) << 8) + int(numbers[5])
     return host, port
-
 
 def parse229(resp, peer):
     '''Parse the '229' response for an EPSV request.
@@ -504,7 +541,7 @@ def parse257(resp):
         dirname = dirname + c
     return dirname
 
-# test()
+
 
 
 def print_warning(warning):
@@ -524,6 +561,15 @@ def timeout_input(prompt, timeout=10):
     finally:
         print(ENDC, end='')
 
+
+
+
+def test():
+    ftp = FTP('127.0.0.1','hatsu3','password')
+    resp = ftp.sendcmd("")
+    print(repr(resp))
+    ftp.quit()
+
 if __name__ == '__main__':
     # run_ftp_server.py
     # - host        =   127.0.0.1:8821 
@@ -535,6 +581,7 @@ if __name__ == '__main__':
     port = 8822
     user = 'username'
     passwd = 'password'
+
 
     ftp_client = FTP()
 
@@ -782,4 +829,3 @@ if __name__ == '__main__':
 
     # ftp_client.quit()
     # # -> 21 Goodbye.
-
