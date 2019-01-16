@@ -1,6 +1,7 @@
 import socket
 import os
 import sys
+import select
 from tqdm import tqdm
 from pathlib import Path
 
@@ -499,6 +500,14 @@ def parse257(resp):
 def print_warning(warning):
     print(WARNING + warning + ENDC)
 
+def timeout_input(prompt, timeout=10):
+    print(prompt)
+    i, __, __ = select.select([sys.stdin], [], [], timeout)
+    if i:
+        return sys.stdin.readline().strip()
+    else:
+        return None
+
 if __name__ == '__main__':
     # run_ftp_server.py
     # - host        =   127.0.0.1:8821 
@@ -530,7 +539,14 @@ if __name__ == '__main__':
     # # -> <OMITTED> ...
 
     while True:
-        cmd = input(f'{UNDERLINE}{BOLD}FTP ➜ ').split()
+        # cmd = input(f'{UNDERLINE}{BOLD}FTP ➜ ').split()
+        prompt = f'{UNDERLINE}{BOLD}FTP ➜ '
+        cmd = timeout_input(prompt, timeout=20)
+        if cmd is None:
+            # print('sending noop')
+            ftp_client.send_noop()
+            continue
+        cmd = cmd.split()
         print(ENDC, end='')
         if not cmd:  # empty input
             continue
