@@ -383,8 +383,13 @@ if __name__ == '__main__':
     # -> drwx------   2 hatsu3   staff          64 Dec 26 16:19 .CMVolumes
     # -> <OMITTED> ...
 
+    # https://stackoverflow.com/questions/287871/print-in-terminal-with-colors
+    BOLD = '\033[1m'
+    ENDC = '\033[0m'
+    WARNING = '\033[93m'
+
     while True:
-        cmd = input('FTP > ').split()
+        cmd = input(f'{BOLD}FTP ➜ {ENDC}').split()
         if not cmd:  # empty input
             continue
         cmd_type = cmd[0].lower()
@@ -401,7 +406,7 @@ if __name__ == '__main__':
             try:
                 ftp_client.cwd(dirname)
             except error_perm:
-                print('No such file or directory')
+                print(f'{WARNING}No such file or directory{ENDC}')
         elif cmd_type == 'pwd':
             print(f'Current working directory: {ftp_client.pwd()}')
         elif cmd_type == 'download':
