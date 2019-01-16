@@ -333,13 +333,23 @@ if __name__ == '__main__':
     # -> 30 Login successful.
 
     ftp_client.dir('.', print)  # ftp_client.dir('./Library')
-    # 200 Type set to: ASCII.
-    # 227 Entering passive mode (127,0,0,1,204,237).
-    # 125 Data connection already open. Transfer starting.
-    # -rw-r--r--   1 hatsu3   staff         267 Jul 18  2018 .489614.padl
-    # -r--------   1 hatsu3   staff           7 Oct 29 12:26 .CFUserTextEncoding
-    # drwx------   2 hatsu3   staff          64 Dec 26 16:19 .CMVolumes
-    # <OMITTED>....
+    # -> 200 Type set to: ASCII.
+    # -> 227 Entering passive mode (127,0,0,1,204,237).
+    # -> 125 Data connection already open. Transfer starting.
+    # -> -rw-r--r--   1 hatsu3   staff         267 Jul 18  2018 .489614.padl
+    # -> -r--------   1 hatsu3   staff           7 Oct 29 12:26 .CFUserTextEncoding
+    # -> drwx------   2 hatsu3   staff          64 Dec 26 16:19 .CMVolumes
+    # -> <OMITTED> ...
+
+    filename = input('Which file to retrieve: ')
+    # <- Users/hatsu3/Documents/GitHub/ftpclient/ftp.py
+    ftp_client.retrlines('RETR ' + filename, callback=print)
+    # -> 200 Type set to: ASCII.
+    # -> 227 Entering passive mode (127,0,0,1,243,131).
+    # -> 125 Data connection already open. Transfer starting.
+    # -> import socket
+    # -> <OMITTED> ...
+    # -> 226 Transfer complete.
 
     ftp_client.quit()
     # -> 21 Goodbye.
