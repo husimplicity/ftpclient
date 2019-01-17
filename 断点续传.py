@@ -14,7 +14,7 @@ class my_FTP(ftp.FTP):
         def size(self, filename):
                 '''Retrieve the size of a file.'''
                 # The SIZE command is defined in RFC-3659
-                print('SIZE ' + filename)
+                #print('SIZE ' + filename)
                 resp = self.sendcmd('SIZE ' + filename)
                 if resp[:3] == '213':
                         s = resp[3:].strip()
@@ -55,7 +55,6 @@ class my_FTP(ftp.FTP):
                                 return
                 self.sendcmd('TYPE I') #规定为binary模式
                 remote_file_size=self.size(remote_file_name)
-                print(remote_file_size)
 
                 if remote_file_size==0 : #远程文件大小为0则返回
                         print ('远程文件大小为0，无需下载')
@@ -66,18 +65,16 @@ class my_FTP(ftp.FTP):
                         with open(local_path, 'ab') as f:
                             f.truncate(local_file_size)
 
-                print(local_file_size)
                 if local_file_size == remote_file_size:    #如果两个文件大小相当则表示已经下载完了
                         print('远程文件已经下载完毕，任务结束')
                         return
                 block_size=1024 #每次传输数据的数据块的大小
                 local_file_size_current=local_file_size #定义为目前本地文件的大小
-                print('RETR '+remote_file_name,local_file_size)
+                #print('RETR '+remote_file_name,local_file_size)
                 conn=self.transfercmd('RETR '+remote_file_name,local_file_size) #开始续传,从指定位置开始下载数据，第二个参数说明现在的文件位置
                 while 1:
                         data_current=conn.recv(block_size) #接收数据块
                         with open(local_path, 'ab') as fp:
-                            print(data_current)
                             fp.write(data_current)
                         print('数据下载中...')
                         if not data_current:  #没有数据块被接收则结束
