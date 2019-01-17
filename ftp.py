@@ -2,6 +2,7 @@ import os
 import sys
 import select
 import socket
+from socket import _GLOBAL_DEFAULT_TIMEOUT
 from pathlib import Path
 
 from tqdm import tqdm
@@ -201,8 +202,8 @@ class FTP:
             else:
                 raise OSError("getaddrinfo returns an empty list")
         sock.listen(1)
-        port = sock.getsockname()[1] # Get proper port
-        host = self.sock.getsockname()[0] # Get proper host
+        port = sock.getsockname()[1]
+        host = self.sock.getsockname()[0]
         if self.af == socket.AF_INET:
             resp = self.sendport(host, port)
         else:
@@ -240,16 +241,14 @@ class FTP:
                 if rest is not None:
                     self.sendcmd("REST %s" % rest)
                 resp = self.sendcmd(cmd)
-                # See above.
                 if resp[0] == '2':
                     resp = self.getresp()
                 if resp[0] != '1':
                     raise error_reply(resp)
-                conn, sockaddr = sock.accept()
+                conn, __ = sock.accept()
                 if self.timeout is not _GLOBAL_DEFAULT_TIMEOUT:
                     conn.settimeout(self.timeout)
         if resp[:3] == '150':
-            # this is conditional in case we received a 125
             size = parse150(resp)
         return conn, size
 
@@ -284,7 +283,7 @@ class FTP:
         return self.voidresp()
 
     def storlines(self, cmd, fp, callback=None):
-        self.voidcmd('TYPE A')
+        self.voidcmd('TYPE A')  # type ASCII (text)
         with self.transfercmd(cmd) as conn:
             while True:
                 buf = fp.readline(self.maxline + 1)
@@ -301,9 +300,8 @@ class FTP:
         return self.voidresp()
 
     def retrbinary(self, cmd, callback, n_block, blocksize=8192, rest=None):
-        self.voidcmd('TYPE I')
+        self.voidcmd('TYPE I')  # type Image (binary)
         with self.transfercmd(cmd, rest) as conn:
-            # while 1:
             for i in tqdm(range(n_block)):
                 data = conn.recv(blocksize)
                 if not data:
@@ -316,7 +314,6 @@ class FTP:
     def storbinary(self, cmd, fp, n_block, blocksize=8192, callback=None, rest=None):
         self.voidcmd('TYPE I')
         with self.transfercmd(cmd, rest) as conn:
-            # while 1:
             for i in tqdm(range(n_block + 1)):
                 buf = fp.read(blocksize)
                 if not buf:
@@ -383,11 +380,6 @@ class FTP:
 
 
     def cwd(self, dirname):
-        '''Change current working directory
-
-        Arguments:
-            dirname {str} -- > cd <dirname>
-        '''
         if dirname == '..':
             try:
                 return self.voidcmd('CDUP')
@@ -406,8 +398,6 @@ class FTP:
 
     def mkd(self, dirname):
         resp = self.voidcmd('MKD ' + dirname)
-        # fix around non-compliant implementations such as IIS shipped
-        # with Windows server 2003
         if not resp.startswith('257'):
             return ''
         return parse257(resp)
@@ -464,10 +454,6 @@ class FTP:
 
 
 def parse150(resp):
-    '''Parse the '150' response for a RETR request.
-    Returns the expected transfer size or None; size is not guaranteed to
-    be present in the 150 message.
-    '''
     if resp[:3] != '150':
         raise error_reply(resp)
     global _150_re
@@ -481,10 +467,6 @@ def parse150(resp):
     return int(m.group(1))
 
 def parse227(resp):
-    '''Parse the '227' response for a PASV request.
-    Raises error_proto if it does not contain '(h1,h2,h3,h4,p1,p2)'
-    Return ('host.addr.as.numbers', port#) tuple.'''
-
     if resp[:3] != '227':
         raise error_reply(resp)
     global _227_re
@@ -500,17 +482,13 @@ def parse227(resp):
     return host, port
 
 def parse229(resp, peer):
-    '''Parse the '229' response for an EPSV request.
-    Raises error_proto if it does not contain '(|||port|)'
-    Return ('host.addr.as.numbers', port#) tuple.'''
-
     if resp[:3] != '229':
         raise error_reply(resp)
     left = resp.find('(')
     if left < 0: raise error_proto(resp)
     right = resp.find(')', left + 1)
     if right < 0:
-        raise error_proto(resp) # should contain '(|||port|)'
+        raise error_proto(resp)
     if resp[left + 1] != resp[right - 1]:
         raise error_proto(resp)
     parts = resp[left + 1:right].split(resp[left+1])
@@ -521,10 +499,6 @@ def parse229(resp, peer):
     return host, port
 
 def parse257(resp):
-    '''Parse the '257' response for a MKD or PWD request.
-    This is a response to a MKD or PWD request: a directory name.
-    Returns the directoryname in the 257 reply.'''
-
     if resp[:3] != '257':
         raise error_reply(resp)
     if resp[3:5] != ' "':
