@@ -13,7 +13,8 @@ CRLF        = '\r\n'
 B_CRLF      = b'\r\n'
 FTP_PORT    = 21
 MAXLINE     = 8192
-_227_re     = None
+_227_re = None
+_150_re = None
 
 
 # https://stackoverflow.com/questions/287871/print-in-terminal-with-colors
@@ -303,7 +304,7 @@ class FTP:
         self.voidcmd('TYPE I')
         with self.transfercmd(cmd, rest) as conn:
             # while 1:
-            for i in tqdm(range(n_block + 1)):
+            for i in tqdm(range(n_block)):
                 data = conn.recv(blocksize)
                 if not data:
                     break
@@ -547,8 +548,11 @@ def parse257(resp):
 def print_warning(warning):
     print(f'{BOLD}{WARNING}{ITALIC}[ERROR] {warning}{ENDC}')
 
-def print_info(info):
-    print(f'{BOLD}{ITALIC}[INFO]  {info}{ENDC}')
+def print_info(info, end=None):
+    if end is not None:
+        print(f'{BOLD}{ITALIC}[INFO]  {info}{ENDC}', end=end)
+    else:
+        print(f'{BOLD}{ITALIC}[INFO]  {info}{ENDC}')
 
 def timeout_input(prompt, timeout=10):
     try:
@@ -658,6 +662,7 @@ if __name__ == '__main__':
                     print('download <FILENAME>')
                     continue
                 filename = cmd_args[0]
+                # local_path = Path(filename).name
                 ftp_client.retrlines(f'RETR {filename}', callback=print)
                 remote_path = Path(ftp_client.pwd()) / filename
                 print_info(f'Downloaded text file {remote_path}')
@@ -813,7 +818,41 @@ if __name__ == '__main__':
                 sz = os.path.getsize(f)
                 print_info(ftp_client.format_size_(sz) + '\t\t', end='')
                 print(f if os.path.isfile(f) else f'{BOLD}{f}{ENDC}')
-        
+
+        elif cmd_type == 'continue_download':
+            try:
+                if len(cmd_args) != 1:
+                    print('download <FILENAME>')
+                    continue
+                filename = cmd_args[0]
+
+                print_info(f'Checking {filename}...')
+                if not Path(filename).is_file():
+                    print_warning(f'{filename}: No such file')
+                    continue
+
+                local_sz = os.path.getsize(Path(filename).name)
+                remote_sz = ftp_client.size(filename)
+                remain_sz = remote_sz - local_sz
+                blocksize = 8192
+                n_block = remain_sz // blocksize + 1
+
+                if n_block == 0:
+                    print_warning('Tranfer completed. Nothing to download')
+                    continue
+
+                print_info(f'Continue downloading {filename}, remaining {ftp_client.format_size_(remain_sz)}')
+                local_path = Path(filename).name
+                remote_path = Path(ftp_client.pwd()) / filename
+
+                with open(local_path, 'ab') as fp:
+                    ftp_client.retrbinary(f'RETR {filename}', callback=(lambda x: fp.write(x)), \
+                                          blocksize=blocksize, n_block=n_block, rest=local_sz)
+
+                print_info(f'Downloaded binary file {remote_path}')
+            except error_perm:
+                print_warning(f'{filename}: No such directory')
+
         else:
             print_warning('Invalid command. Try help')
 
