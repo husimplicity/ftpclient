@@ -556,8 +556,8 @@ def timeout_input(prompt, timeout=10):
             print(prompt)
         i, __, __ = select.select([sys.stdin], [], [], timeout)
         return sys.stdin.readline().strip() if i else None
-    except e:
-        throw
+    except:
+        raise
     finally:
         print(ENDC, end='')
 
