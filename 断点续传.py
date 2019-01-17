@@ -61,13 +61,14 @@ class my_FTP(ftp.FTP):
                         return
                 local_file_size=0
                 if os.path.exists(local_path):    #表示本地路径已经存在，即文件已经下载了一部分了
-                        local_file_size=os.stat(local_path).st_size-1 #如果本地已经有文件则读取本地文件的大小
+                        local_file_size=os.stat(local_path).st_size #如果本地已经有文件则读取本地文件的大小
+                        if local_file_size == remote_file_size:    #如果两个文件大小相当则表示已经下载完了
+                            print('远程文件已经下载完毕，任务结束')
+                            return
+                        local_file_size -= 1
                         with open(local_path, 'ab') as f:
                             f.truncate(local_file_size)
 
-                if local_file_size == remote_file_size:    #如果两个文件大小相当则表示已经下载完了
-                        print('远程文件已经下载完毕，任务结束')
-                        return
                 block_size=1024 #每次传输数据的数据块的大小
                 local_file_size_current=local_file_size #定义为目前本地文件的大小
                 #print('RETR '+remote_file_name,local_file_size)
