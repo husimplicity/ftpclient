@@ -1,67 +1,23 @@
-# ftpclient
-
-`run_ftp_server.py` 依赖于第三方库 [**pyftpdlib**](https://github.com/giampaolo/pyftpdlib)
-
-```bash
-cd ftpclient
-. ./setup_pyftpdlib.sh
-python run_ftp_server.py
-python ftp.py
-```
-
-```
-» tree
-.
-├── README.md
-├── __pycache__
-│   └── ftp.cpython-36.pyc
-├── ftp.py
-├── pyftpdlib
-│   ├── __init__.py
-│   ├── __main__.py
-│   ├── __pycache__
-│   │   ├── ...
-│   ├── _compat.py
-│   ├── authorizers.py
-│   ├── ...
-├── run_ftp_server.py
-├── setup_pyftpdlib.sh
-└── 断点续传.py
-```
-
-```
-» python run_ftp_server.py -h
-usage: run_ftp_server.py [-h] [--username USERNAME] [--password PASSWORD]
-                         [--root ROOT] [--port PORT]
-
-Run Local FTP Server
-
-optional arguments:
-  -h, --help            show this help message and exit
-  --username USERNAME, -u USERNAME
-  --password PASSWORD, -p PASSWORD
-  --root ROOT, -r ROOT
-  --port PORT, -P PORT
-
-
-
-» python run_ftp_server.py -P 8823
-[I 2019-01-15 23:38:31] >>> starting FTP server on 127.0.0.1:8823, pid=61216 <<<
-[I 2019-01-15 23:38:31] concurrency model: async
-[I 2019-01-15 23:38:31] masquerade (NAT) address: None
-[I 2019-01-15 23:38:31] passive ports: None
-
-
-
-» python ftp.py
-220 pyftpdlib 1.5.4 ready.
-331 Username ok, send password.
-230 Login successful.
-200 Type set to: ASCII.
-227 Entering passive mode (127,0,0,1,220,197).
-125 Data connection already open. Transfer starting.
--rw-rw-r--   1 root     admin       14340 Jan 11 03:35 .DS_Store
-d--x--x--x   9 root     wheel         288 Jan 08 04:05 .DocumentRevisions-V100
-```
-
-
+# FTP客户端的初步实现和keepalive/断点续传的实现
+## 一、动机
+FTP协议是文件传输协议，是用于在网络上进行文件传输的一套标准协议。其采用客户端-服务器模式。它运行在应用层。在互联网的新时代，认识并理解一门古老而有效的网络文件传输技术是很有必要的。Keepalive和断点续传则是FTP服务端所应该进一步实现的功能，我们为了能够更好地理解FTP的机制，并增强FTP服务器的鲁棒性、适用性，增强其功能，特地实现了这两个功能。
+## 二、FTP客户端的实现
+## 三、Keepalive的实现
+## 四、断点续传的实现
+我们实现的是下载文件时FTP客户端的断点续传。我们实现的功能是从FTP服务器上下载数据时如果断点，能够实现续传。
+### 完成步骤：
+#### 1.初步处理
+设立一个继承FTP的类MyFTP类。在其中定义ftp_login()函数，用于调用FTP类中的connect和login函数进行连接和登录。
+#### 2.读取远端待下载文件和本地目标文件的基本信息
+我们实现的简易断点续传主要读取这两个文件的长度信息。远端文件用SIZE命令请求读取，本地文件用os.stat(local_path).st_size函数直接读取。如果此时两个文件大小相等，则认为已经传输结束，无需断点续传，程序直接结束。
+#### 3.远程文件断点续传
+我们从断点处开始进行传输，来完成断点续传。断点处定义为本地目标文件的大小。即：我们传输远程文件的剩余部分。文件按块传输，一次传输1024字节。
+我们通过transfercmd('RETR'+remote_file_name,local_file_size)函数发送RETR命令来指定续传的开始位置并建立一个连接。
+然后，我们用这个连接接收数据到data数据块，然后把data数据块用本地文件的读取机制写入到目标文件中。目标文件大小和远程文件大小相等后认为传输完成。
+## 五、实验感想
+从FTP客户端的实现，我们认识到了理解网络协议原理对于实现应用的重要性。我们运用更底层的函数实现FTP客户端，和运用FTP客户端封装好的函数进一步实现断点续传和KeepAlive功能。我们也感受到了自己用代码实现网络编程并经过调试让它运行起来的乐趣。
+## 六、人员分工
+金奕成：FTP客户端的实现、程序整合修改
+胡树弦：FTP客户端的实现
+倪铭坚：断点续传的实现
+王士珉：KeepAlive功能的实现
